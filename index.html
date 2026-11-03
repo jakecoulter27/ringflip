@@ -1,0 +1,74 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d1a"><link rel="manifest" href="manifest.json"><link rel="icon" href="icon.svg"><title>RingFlip</title>
+<style>*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;height:100%;background:#0b0d1a;color:#fff;font-family:system-ui,sans-serif;overflow:hidden;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+.ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:20px}.hide{display:none}
+h1{font-size:52px;margin:0;letter-spacing:1px;background:linear-gradient(90deg,#7c5cff,#2ecc8f,#ffd23f);-webkit-background-clip:text;color:transparent}
+.b{border:0;border-radius:16px;padding:14px 22px;font-size:18px;font-weight:800;color:#fff;background:#7c5cff;min-width:220px;cursor:pointer}.b.s{background:#22284a}.b.d{background:linear-gradient(90deg,#ff7a59,#ffb648)}
+.m{color:#9aa3c7;font-size:14px}#hud{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;padding:14px 18px;font-weight:800;font-size:20px;pointer-events:none}
+.sk{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;max-width:340px}.sw{width:54px;height:54px;border-radius:50%;border:3px solid transparent;cursor:pointer;position:relative;font-size:11px;display:flex;align-items:center;justify-content:center}.sw.on{border-color:#fff}.sw.lock{opacity:.35}
+#toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#2ecc8f;padding:10px 16px;border-radius:12px;font-weight:700;opacity:0;transition:.3s}</style></head><body>
+<canvas id="c"></canvas><div id="hud" class="hide"><span id="hs">0</span><span id="ht">60</span></div>
+<div id="title" class="ui"><h1>RingFlip</h1><div class="m">Tap anywhere to flip rings. Dodge spikes, grab gems.<br>Survive 60 seconds.</div>
+<button class="b" id="bPlay">▶ Play</button><button class="b d" id="bDaily">☀ Daily Challenge</button>
+<div class="m" id="stats"></div><button class="b s" id="bSkins">🎨 Skins</button><button class="b s" id="bSound" style="min-width:auto">🔊 Sound: on</button></div>
+<div id="skins" class="ui hide"><h2>Skins</h2><div class="m" id="gemtot"></div><div class="sk" id="sklist"></div><button class="b s" id="bBack">Back</button></div>
+<div id="over" class="ui hide"><h2 id="oT"></h2><div style="font-size:48px;font-weight:900" id="oS"></div><div class="m" id="oM"></div>
+<button class="b" id="bAgain">↻ Play again</button><button class="b s" id="bShare">📋 Share result</button><button class="b s" id="bHome">Home</button></div><div id="toast"></div>
+<script>
+const $=id=>document.getElementById(id),cv=$('c'),x=cv.getContext('2d');
+const SKINS=[['Mint','#2ecc8f',0],['Sun','#ffd23f',25],['Coral','#ff5c7a',60],['Sky','#4aa3ff',120],['Neon','#ff4df0',200],['Ghost','#ffffff',350],['Rainbow','rainbow',600]];
+const P=Object.assign({best:0,gems:0,skin:0,sound:1,dStreak:0,dLast:'',dBest:{},played:0},JSON.parse(localStorage.getItem('ringflip')||'{}'));const save=()=>localStorage.setItem('ringflip',JSON.stringify(P));
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+function hash(s){let h=2166136261;for(const c of s)h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0}
+function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let W,H,DPR;function rs(){DPR=devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;x.setTransform(DPR,0,0,DPR,0,0)}addEventListener('resize',rs);rs();
+let AC;function beep(f,d=.08,type='sine',v=.15){if(!P.sound)return;try{AC=AC||new AudioContext();const o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.value=f;g.gain.setValueAtTime(v,AC.currentTime);g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+d);o.connect(g).connect(AC.destination);o.start();o.stop(AC.currentTime+d)}catch(e){}}
+let G=null;const LEN=60;
+function start(daily){const seed=daily?hash('ringflip-'+today()):(Math.random()*1e9)|0;G={daily,seed,r:rng(seed),t:0,ang:-Math.PI/2,ring:1,rv:1,obs:[],parts:[],score:0,gems:0,combo:0,shake:0,next:1,alive:true,flips:0,pulse:0,log:[]};
+['title','over','skins'].forEach(i=>$(i).classList.add('hide'));$('hud').classList.remove('hide');beep(520,.1)}
+function radii(){const R=Math.min(W,H)*.36;return[R*.62,R]}
+function flip(){if(!G||!G.alive)return;G.ring^=1;G.flips++;G.pulse=1;beep(G.ring?660:440,.06,'triangle');burst(pos(),skinCol(),6,2)}
+function pos(){const[a,b]=radii(),r=G.ring?b:a+(0);return[W/2+Math.cos(G.ang)*r,H/2+Math.sin(G.ang)*r]}
+function skinCol(){const c=SKINS[P.skin][1];return c=='rainbow'?`hsl(${(performance.now()/5)%360},90%,65%)`:c}
+function burst([px,py],col,n,sp){for(let i=0;i<n;i++){const a=Math.random()*6.28,s=Math.random()*sp+1;G.parts.push({x:px,y:py,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:1,col})}}
+function speed(){return 2.2+G.t*0.045}// rad/s rises
+function step(dt){G.t+=dt;G.ang+=speed()*dt;G.next-=dt;
+ if(G.next<=0){const r=G.r;G.next=Math.max(.32,1.0-G.t*.011)*(.7+r()*.6);const ahead=G.ang+1.6+r()*1.2;const gem=r()<.28;const ring=r()<.5?0:1;G.obs.push({a:ahead,ring,gem,born:G.t});
+  if(!gem&&G.t>20&&r()<.25)G.obs.push({a:ahead+.25,ring:ring^1,gem:false,born:G.t})}
+ for(const o of G.obs){if(o.dead)continue;const d=G.ang-o.a;if(Math.abs(d)<.11&&o.ring==G.ring){if(o.gem){o.dead=1;G.gems++;G.combo++;G.score+=10*Math.min(5,1+Math.floor(G.combo/3));beep(880+G.combo*40,.07);burst(pos(),'#ffd23f',14,4);toast2()}else{die();return}}if(d>.6){if(!o.gem&&!o.dead)G.score+=1;o.dead=1}}
+ G.obs=G.obs.filter(o=>!o.dead||0);if(G.t>=LEN){end(true)}}
+function toast2(){}
+function die(){G.alive=false;G.shake=18;beep(120,.35,'sawtooth',.2);burst(pos(),'#ff5c7a',40,6);G.combo=0;setTimeout(()=>end(false),700)}
+function end(won){if(G.over)return;G.over=1;G.alive=false;if(won){G.score+=100;beep(784,.2)}const s=G.score;P.gems+=G.gems;P.played++;let nb=s>P.best;if(nb)P.best=s;
+ let dmsg='';if(G.daily){const k=today();if(P.dLast!==k){const y=new Date();y.setDate(y.getDate()-1);const yk=y.getFullYear()+'-'+String(y.getMonth()+1).padStart(2,'0')+'-'+String(y.getDate()).padStart(2,'0');P.dStreak=P.dLast===yk?P.dStreak+1:1;P.dLast=k}P.dBest[k]=Math.max(P.dBest[k]||0,s);dmsg=` · Daily streak ☀${P.dStreak}`}
+ const unl=SKINS.filter(k=>k[2]>P.gems-G.gems&&k[2]<=P.gems);save();G.res={s,won,t:Math.min(LEN,G.t)|0,gems:G.gems,daily:G.daily};
+ $('hud').classList.add('hide');$('over').classList.remove('hide');$('oT').textContent=won?'🎉 Survived!':'💥 Crashed';$('oS').textContent=s;
+ $('oM').innerHTML=`${nb?'🏆 New personal best!<br>':''}Time ${G.res.t}s · 💎${G.gems} · Best ${P.best}${dmsg}${unl.length?'<br>🎨 Unlocked skin: '+unl.map(k=>k[0]).join(', '):''}`}
+function shareStr(){const r=G.res,bl=Math.round(r.t/6);return`RingFlip ${r.daily?'Daily '+today():'Free Play'} ${r.won?'✅':'💥'}\n${'🟩'.repeat(bl)}${'⬛'.repeat(10-bl)} ${r.t}s\n💎${r.gems}  ⭐${r.s}${r.daily?'  ☀'+P.dStreak:''}`}
+let last=performance.now(),acc=0;function loop(n){let dt=Math.min(.1,(n-last)/1000);last=n;if(G&&G.alive&&!G.over){acc+=dt;while(acc>=1/60){step(1/60);acc-=1/60;if(!G.alive)break}}draw(dt);requestAnimationFrame(loop)}
+function draw(dt){x.fillStyle='#0b0d1a';x.fillRect(0,0,W,H);x.save();if(G&&G.shake>0){x.translate((Math.random()-.5)*G.shake,(Math.random()-.5)*G.shake);G.shake*=.88}
+ const[ra,rb]=radii(),cx=W/2,cy=H/2,t=performance.now()/1000;
+ [ra,rb].forEach((r,i)=>{x.beginPath();x.arc(cx,cy,r,0,7);x.strokeStyle=G&&G.ring==i&&G.alive?'#3a3f78':'#1d2245';x.lineWidth=G&&G.ring==i?10:6;x.stroke()});
+ if(!G){x.beginPath();const a=t*2;x.arc(cx+Math.cos(a)*rb,cy+Math.sin(a)*rb,14,0,7);x.fillStyle=skinCol();x.shadowBlur=20;x.shadowColor=x.fillStyle;x.fill();x.restore();return}
+ for(const o of G.obs){const r=o.ring?rb:ra,px=cx+Math.cos(o.a)*r,py=cy+Math.sin(o.a)*r,k=Math.min(1,(G.t-o.born)*4);x.save();x.translate(px,py);x.scale(k,k);
+  if(o.gem){x.rotate(t*3);x.fillStyle='#ffd23f';x.shadowBlur=15;x.shadowColor='#ffd23f';x.beginPath();x.moveTo(0,-11);x.lineTo(9,0);x.lineTo(0,11);x.lineTo(-9,0);x.fill()}
+  else{x.rotate(o.a);x.fillStyle='#ff5c7a';x.shadowBlur=12;x.shadowColor='#ff5c7a';x.beginPath();for(let i=0;i<8;i++){const rr=i%2?7:16,aa=i*Math.PI/4;x.lineTo(Math.cos(aa)*rr,Math.sin(aa)*rr)}x.fill()}x.restore()}
+ if(G.alive){const[px,py]=pos(),s=14+G.pulse*6;G.pulse*=.85;x.beginPath();x.arc(px,py,s,0,7);x.fillStyle=skinCol();x.shadowBlur=25;x.shadowColor=x.fillStyle;x.fill();x.shadowBlur=0;
+  for(let i=1;i<6;i++){const a=G.ang-i*.06;const r=G.ring?rb:ra;x.globalAlpha=.25-i*.04;x.beginPath();x.arc(cx+Math.cos(a)*r,cy+Math.sin(a)*r,12-i,0,7);x.fill()}x.globalAlpha=1}
+ x.shadowBlur=0;for(const p of G.parts){p.x+=p.vx;p.y+=p.vy;p.vx*=.95;p.vy*=.95;p.l-=.025;x.globalAlpha=Math.max(0,p.l);x.fillStyle=p.col;x.fillRect(p.x-2,p.y-2,4,4)}x.globalAlpha=1;G.parts=G.parts.filter(p=>p.l>0);
+ if(G.combo>=3&&G.alive){x.fillStyle='#ffd23f';x.font='800 22px system-ui';x.textAlign='center';x.fillText('COMBO x'+Math.min(5,1+Math.floor(G.combo/3)),cx,cy+8)}
+ x.restore();$('hs').textContent='⭐ '+G.score;$('ht').textContent=Math.max(0,Math.ceil(LEN-G.t))+'s'}
+function stats(){$('stats').innerHTML=`Best ⭐${P.best} · 💎${P.gems} · ☀ Daily streak ${P.dStreak}${P.dBest[today()]!=null?' · Today ⭐'+P.dBest[today()]:''}`;$('bSound').textContent='🔊 Sound: '+(P.sound?'on':'off')}
+function home(){G=null;['over','skins','hud'].forEach(i=>$(i).classList.add('hide'));$('title').classList.remove('hide');stats()}
+function skins(){$('title').classList.add('hide');$('skins').classList.remove('hide');$('gemtot').textContent='💎 '+P.gems+' gems collected — earn more to unlock';
+ $('sklist').innerHTML=SKINS.map((k,i)=>`<div class="sw ${i==P.skin?'on':''} ${P.gems<k[2]?'lock':''}" data-i="${i}" style="background:${k[1]=='rainbow'?'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)':k[1]}">${P.gems<k[2]?'🔒'+k[2]:''}</div>`).join('');
+ document.querySelectorAll('.sw').forEach(e=>e.onclick=()=>{const i=+e.dataset.i;if(P.gems>=SKINS[i][2]){P.skin=i;save();skins()}})}
+const tap=e=>{if(G&&G.alive){e.preventDefault();flip()}};cv.addEventListener('pointerdown',tap);addEventListener('keydown',e=>{if(e.code=='Space')flip()});
+$('bPlay').onclick=()=>start(false);$('bDaily').onclick=()=>start(true);$('bAgain').onclick=()=>start(G.res.daily);$('bHome').onclick=home;$('bSkins').onclick=skins;$('bBack').onclick=home;
+$('bSound').onclick=()=>{P.sound^=1;save();stats()};
+$('bShare').onclick=()=>{const s=shareStr();(navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).catch(()=>{}).finally(()=>{const t=$('toast');t.textContent='Copied to clipboard!';t.style.opacity=1;setTimeout(()=>t.style.opacity=0,1500)})};
+window.__rf={hash,rng,today,shareStr:()=>shareStr(),get G(){return G}};
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+home();requestAnimationFrame(loop);
+</script></body></html>
